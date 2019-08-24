@@ -195,7 +195,7 @@ if(!defined $stringFile ) {
     print STDERR "Done\n" if(defined $verbose);
 
     my %density = ();
-    print "#Protein1\tProtein2\tDensityScore1\tDensityScore2\tInteractionScore\n";
+    print "#Protein1\tProtein2\tDensityScore1\tDensityScore2\tSTRINGscore\tNumberOfInt1\tNumberOfInt2\n";
     foreach my $ensp1 (sort keys %string) {
 	if(!exists $density{$ensp1}) {
 	    &searchNeighbourhood($ensp1);
