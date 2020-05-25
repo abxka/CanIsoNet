@@ -9,7 +9,7 @@ The whole methodology follows following procedure:
 Required files are:
 
 * [3did interaction file](https://3did.irbbarcelona.org/download/2018_04/3did_flat.gz). Save in directory databases/3did/v2018_04.
-* [Ensembl transcript FASTA file](ftp://ftp.ensembl.org/pub/release-75/fasta/homo_sapiens/pep/Homo_sapiens.GRCh37.75.pep.abinitio.fa.gz) (open with Google Chrome or Firefox). Save in directory databases/ensembl/v75.
+* [Ensembl transcript FASTA file](http://ftp.ensembl.org/pub/release-75/fasta/homo_sapiens/pep/Homo_sapiens.GRCh37.75.pep.abinitio.fa.gz). Save in directory databases/ensembl/v75.
 * [PFAM domain file](ftp://ftp.ebi.ac.uk/pub/databases/Pfam/releases/Pfam32.0/proteomes/9606.tsv.gz). Save in directory databases/pfam/v32.
 * STRING haploduplications. Find in directory databases/string/v10.
 * STRING SMART Linkouts. Find in directory databases/string/v10.
