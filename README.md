@@ -9,7 +9,7 @@ The whole methodology follows following procedure:
 Required files are:
 
 * [3did interaction file](https://3did.irbbarcelona.org/download/2018_04/3did_flat.gz). Save in directory databases/3did/v2018_04.
-* [Ensembl transcript FASTA file](http://ftp.ensembl.org/Homo_sapiens.GRCh37.75.pep.all.fa.gz). Save in directory databases/ensembl/v75.
+* [Ensembl transcript FASTA file](ftp://ftp.ensembl.org/pub/release-75/fasta/homo_sapiens/pep/Homo_sapiens.GRCh37.75.pep.abinitio.fa.gz) (open with Google Chrome or Firefox). Save in directory databases/ensembl/v75.
 * [PFAM domain file](ftp://ftp.ebi.ac.uk/pub/databases/Pfam/releases/Pfam32.0/proteomes/9606.tsv.gz). Save in directory databases/pfam/v32.
 * STRING haploduplications. Find in directory databases/string/v10.
 * STRING SMART Linkouts. Find in directory databases/string/v10.
@@ -73,6 +73,7 @@ Required files are:
 * [GTEx metadata file](http://synapse.org/#!Synapse:syn7596611). Save in directory databases/pcawg.
 * [PCAWG Kallisto TPM file from PCAWG](http://synapse.org/#!Synapse:syn7536587). Save in directory databases/pcawg.
 * [GTEx Kallisto TPM file from PCAWG](http://synapse.org/#!Synapse:syn7596599). Save in directory databases/pcawg.
+* [PCAWG Mutation file in MAF format](https://www.synapse.org/#!Synapse:syn7364923). Save in directory databases/pcawg.
 * Ensembl Biomart ID mapping (ENSG,ENSP,ENST,ENSE,GeneName). Find in directory databases/ensembl/v75 or [download from here](http://feb2014.archive.ensembl.org/biomart/martview)
 
 
