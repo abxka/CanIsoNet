@@ -30,7 +30,9 @@ my (
     $minExpress,
     $canonFile,
     $verbose,
+    $sequenceFile,
     $pvalueFile,
+    $randomPvalueFile,
    );
 
 ##############################################################################
@@ -43,12 +45,14 @@ my (
     "ensgFile=s"            => \$enst2ensgFile,    # e.g. ensg_ensp_enst_ense_geneName_v75.tsv.gz
     "canonFile=s"           => \$canonFile,        # e.g. /mnt/mnemo2/abdullah/databases/string/v10.0/canonical_isoforms_ensg_ensp_enst_geneName_v75.tsv.gz
     "isoformIntFile=s"      => \$isoformIntFile,   # isoform interaction file, e.g. interactionsInIsoforms_900_2.tsv.gz
+    "sequenceFile=s"        => \$sequenceFile,     # file with sequences of ENSPs e.g. ensp_ensg_enst_sequence.tsv.gz
     "minStringScore=i"      => \$minStringScore,   # e.g. 900
     "enstColumnNuo=i"       => \$enstColumnNo,     # e.g. 0. Column number of enst in pcawg and gtex file. Starts with 0.
     "minEnrichment=f"       => \$minEnrichment,    # e.g. 2
     "maxQvalue=f"           => \$maxQvalue,        # e.g. 0.05
     "minExpress=f"          => \$minExpress,       # e.g. 1. Minimum Expression below which isoform is considered to be not expressed.
     "pvalueFile:s"          => \$pvalueFile,       # e.g. pvalues.tsv
+    "randomPvalueFile:s"    => \$randomPvalueFile, # e.g. random_pvalues.tsv
     "verbose!"              => \$verbose,          # print out additional information on calculation progress plus warning messages
 ) or die "\nTry \"$0 -h\" for a complete list of options\n\n";
 
@@ -61,7 +65,7 @@ if ($help) {printHelp(); exit}
 ### SETTINGS #################################################################
 ##############################################################################
 $| = 1;
-my $multFactor = 1000;
+srand(23);
 ##############################################################################
 ### SUBROUTINES ##############################################################
 ############################################################################## 
@@ -176,6 +180,7 @@ sub readExpressionFile {
 
     my %relEnstExpress = ();
     my %relEnstExpressString = ();
+    my @allRelEnstExpress = ();
     # calculate relative transcript expression
     foreach my $ensg (sort keys %enstExpress) {
 	foreach my $sample (sort keys %{$enstExpress{$ensg}}) {
@@ -184,11 +189,10 @@ sub readExpressionFile {
 		my $transExpress = $enstExpress{$ensg}->{$sample}->{$enst};
 
 		my $relExpress = 0.0;
-		if($transExpress >= $minExpress) {
-		    $relExpress = $transExpress / $geneExpress * $multFactor;
-		}
+		$relExpress = $transExpress / $geneExpress if($geneExpress > 0);
 
 		$relEnstExpress{$ensg}->{$enst}->{$sample} = $relExpress;
+		push(@allRelEnstExpress, $relExpress);
 		if(exists $relEnstExpressString{$ensg}->{$enst}) {
 		    $relEnstExpressString{$ensg}->{$enst} .= sprintf(" %.3f", $relExpress);
 		} else {
@@ -198,14 +202,15 @@ sub readExpressionFile {
 	}
     }
 
-    return (\%ensgExpress, \%enstExpress, \%relEnstExpress, \%relEnstExpressString);
+    return (\%ensgExpress, \%enstExpress, \%relEnstExpress, \%relEnstExpressString, \@allRelEnstExpress);
 }
 ##############################################################################
 sub enrichment {
 
-    (my $express) = @_;
+    my ($express, $minimumExpress) = @_;
 
     my %enrichment = ();
+    my @allEnrichment = ();
     foreach my $ensg (sort keys %$express) {
 	foreach my $sample (sort keys %{$express->{$ensg}}) {
 	    my $mostDominantEnst = "-";
@@ -228,14 +233,18 @@ sub enrichment {
 		}
 		my $enrichment = $mostDominantEnstExpress;
 		# ignore transcripts with insignifcant expression
-		$enrichment = $mostDominantEnstExpress/$enstExpress if($mostDominantEnstExpress >= $minExpress and $enstExpress >= $minExpress);
-		
-		$enrichment{$ensg}->{$mostDominantEnst}->{$sample} = $enrichment if($enrichment >= $minEnrichment);
+		if($mostDominantEnstExpress >= $minimumExpress){
+		    $enrichment = $mostDominantEnstExpress/$enstExpress if($enstExpress > 0);
+		    if($enrichment >= $minEnrichment) {
+			$enrichment{$ensg}->{$mostDominantEnst}->{$sample} = $enrichment;
+			push(@allEnrichment, $enrichment);
+		    }
+		}
 		last if($n == 2);
 	    }
 	}
     }
-    return \%enrichment;
+    return (\%enrichment, \@allEnrichment);
 }
 ###############################################################################
 sub readCanonFile {
@@ -284,6 +293,20 @@ sub readIsoformIntFile {
     close(F4);
     return (\%missInt4isoform, \%intN);
 }
+###############################################################################
+sub readSequenceFile {
+    my %sequences = ();
+    open(F5, "zcat $sequenceFile |") or die "\nERROR: Failed to open $sequenceFile: $!\n\n";
+    while(my $l = <F5>) {
+	next if($l !~ /^EN/);
+	chomp($l);
+	my ($ensp, $ensg, $enst, $sequence) = split(/\t/, $l);
+	$sequences{$enst} = $sequence;
+    }
+    close(F5);
+    print STDERR "Found ".(keys %sequences)." sequences\n" if(defined $verbose);
+    return \%sequences;
+}
 ##############################################################################
 sub median {
     my @values = sort{$a<=>$b} @_;
@@ -330,6 +353,10 @@ if(!defined $isoformIntFile) {
     print STDERR "\tPlease provide an isoform interaction file. Try $0 -help to get more information\n";
     $exit = 1;
 }
+if(!defined $sequenceFile) {
+    print STDERR "\tPlease provide a sequence file. Try $0 -help to get more information\n";
+    $exit = 1;
+}
 if(!defined $enstColumnNo){
     print STDERR "\tPlease provide a column number for ENST IDs. Try $0 -help to get more information\n";
     $exit = 1;
@@ -356,11 +383,11 @@ if($exit) {
 }
 
 print STDERR "Reading in $expressPcawgFile ... " if($verbose);
-my ($ensgExpressPcawg, $enstExpressPcawg, $relEnstExpressPcawg, $relEnstExpressStringPcawg) = &readExpressionFile($expressPcawgFile);
+my ($ensgExpressPcawg, $enstExpressPcawg, $relEnstExpressPcawg, $relEnstExpressStringPcawg, $allRelEnstExpressPcawg) = &readExpressionFile($expressPcawgFile);
 print STDERR "done\n" if($verbose);
 
 print STDERR "Reading in $expressGtexFile ... " if($verbose);
-my ($ensgExpressGtex,  $enstExpressGtex, $relEnstExpressGtex, $relEnstExpressStringGtex)  = &readExpressionFile($expressGtexFile);
+my ($ensgExpressGtex,  $enstExpressGtex, $relEnstExpressGtex, $relEnstExpressStringGtex, $allRelEnstExpressGtex)  = &readExpressionFile($expressGtexFile);
 print STDERR "done\n" if($verbose);
 
 print STDERR "Reading $canonFile ... " if($verbose);
@@ -371,12 +398,16 @@ print STDERR "Reading $isoformIntFile ... " if($verbose);
 my ($missIsoInt, $intN) = &readIsoformIntFile();
 print STDERR "done\n" if($verbose);
 
+print STDERR "Reading $sequenceFile ... " if($verbose);
+my ($sequences) = &readSequenceFile();
+print STDERR "done\n" if($verbose);
+
 print STDERR "Calculating Enrichment for PCAWG ... " if($verbose);
-my $enrichmentPcawg = &enrichment($enstExpressPcawg);
+my ($enrichmentPcawg, $allEnrichmentPcawg) = &enrichment($enstExpressPcawg, $minExpress);
 print STDERR "done\n" if($verbose);
 
 print STDERR "Calculating Enrichment for GTEx ... " if($verbose);
-my $enrichmentGtex = &enrichment($enstExpressGtex);
+my ($enrichmentGtex, $allEnrichmentGtex) = &enrichment($enstExpressGtex, $minExpress*0.1);
 print STDERR "done\n" if($verbose);
 
 # print file header
@@ -390,9 +421,14 @@ my $R = Statistics::R->new();
 $R->startR();
 
 if(defined $pvalueFile) {
-    open(O, ">$pvalueFile");
-    print O "#ENSG\tDomCancerTrans\tCancerSampleId\tMedianRelMDIexpressionInNormal\tRelMDIexpressionInCancer\t".
-	  "PCAWGhigherExpressionN\tPCAWGlowerExpressionN\tPvalue\n";
+    open(O1, ">$pvalueFile");
+    print O1 "#ENSG\tDomCancerTrans\tCancerSampleId\tMedianRelMDIexpressionInNormal\tRelMDIexpressionInCancer\t".
+	  "PCAWGhigherExpressionN\tPCAWGlowerExpressionN\tPvalue\tRelMDIexpressionInGTEx\n";
+}
+if(defined $randomPvalueFile) {
+    open(O2, ">$randomPvalueFile");
+    print O2 "#ENSG\tDomCancerTrans\tCancerSampleId\tMedianRelMDIexpressionInNormal\tRelMDIexpressionInCancer\t".
+	     "PCAWGhigherExpressionN\tPCAWGlowerExpressionN\tPvalue\n";
 }
 
 
@@ -408,12 +444,11 @@ foreach my $ensg (sort keys %$enrichmentPcawg) {
 		    my $enstRelExpressPcawg = $relEnstExpressPcawg->{$ensg}->{$enst}->{$sample};
 		    my $enstRelExpressesGtex = $relEnstExpressStringGtex->{$ensg}->{$enst};
 		    # only do analysis for MDI, i.e. those transcripts having a two-fold expression surplus + their frequency is 
-		    # significantly different from GTEx and they are specific to PCAWG
+		    # significantly different from GTEx and they are specific to PCAWG + they are expressed more than minExpress
 		    if(!exists $enrichmentGtex->{$ensg}->{$enst} and (exists $enrichmentGtex->{$ensg} and keys %{$enrichmentGtex->{$ensg}} > 0)) {
-
-			# all elements in the GTEx relative frequency distribution must not be identical. Otherwise parameter for weibull distribution can not be
-			# determined.
+			
 			my @enstRelExpressesGtex = split(/\s/, $enstRelExpressesGtex);
+			
 			
 			my $relExpressionGtexMedian = 0;
 			$relExpressionGtexMedian = &median(@enstRelExpressesGtex) if(@enstRelExpressesGtex > 0);
@@ -424,19 +459,38 @@ foreach my $ensg (sort keys %$enrichmentPcawg) {
 			    $pos++ if($enstRelExpressPcawg > $enstRelExpressGtex);
 			    $neg++ if($enstRelExpressPcawg < $enstRelExpressGtex);
 			}
-			
+
 			$R->send(qq`pcawg = $enstRelExpressPcawg`);
 			$R->send(qq`test = binom.test(c($pos, $neg), p=0.5, alternative="two.sided", conf.level=1-$maxQvalue)`);
 			$R->send(q`cat(test$p.value)`);
 			my $pvalue = $R->read();
 
-			print O "$ensg\t$enst\t$sample".sprintf("\t%.3f\t", $relExpressionGtexMedian/$multFactor).
-			        sprintf("%.3f\t", $enstRelExpressPcawg/$multFactor)."$pos\t$neg".
-				sprintf("\t%.3e\n", $pvalue) if(defined $pvalueFile);
+			print O1 "$ensg\t$enst\t$sample".sprintf("\t%.3f\t", $relExpressionGtexMedian).
+			        sprintf("%.3f\t", $enstRelExpressPcawg)."$pos\t$neg".
+				sprintf("\t%.3e\t", $pvalue)."\t$enstRelExpressesGtex\n" if(defined $pvalueFile);
 
-			# MDI relative expression in PCAWG should be higher than its median expression in GTEx
-			next if($enstRelExpressPcawg < $relExpressionGtexMedian);
+			for(my $j= 0; $j<100; $j++) {
+			    #my $randomEnstRelExpressPcawg = $allRelEnstExpressPcawg->[int(rand(@$allRelEnstExpressPcawg))];
+			    my $randomEnrichmentPcawg = $allEnrichmentPcawg->[int(rand(@$allEnrichmentPcawg))];
+			                                                                 
+			    my $rPos = 0;
+			    my $rNeg = 0;
+			    foreach my $enstRelExpressGtex (@enstRelExpressesGtex) {
+				$rPos++ if($randomEnrichmentPcawg > $enstRelExpressGtex);
+				$rNeg++ if($randomEnrichmentPcawg < $enstRelExpressGtex);
+			    }
+			    $R->send(qq`rPcawg = $randomEnrichmentPcawg`);
+			    $R->send(qq`rTest = binom.test(c($rPos, $rNeg), p=0.5, alternative="two.sided", conf.level=1-$maxQvalue)`);
+			    $R->send(q`cat(rTest$p.value)`);
+			    my $randomPvalue = $R->read();
+			    
+			    print O2 "$ensg\t$enst\t$sample".sprintf("\t%.3f\t", $relExpressionGtexMedian).
+#			        sprintf("%.3f\t", $randomEnstRelExpressPcawg)."$rPos\t$rNeg".
+			        sprintf("%.3f\t", $randomEnrichmentPcawg)."$rPos\t$rNeg".
+				sprintf("\t%.3e\n", $randomPvalue) if(defined $randomPvalueFile);
+			}
 
+			
 			# So P-value must be smaller than maxQvalue
 			if($pvalue < $maxQvalue) {
 			    $pvalues .= $pvalue." ";
@@ -449,23 +503,28 @@ foreach my $ensg (sort keys %$enrichmentPcawg) {
 			    my $missedCommonIntN = -1;
 			    my %gtexMDIs = ();
 			    my @mdiEnrichmentsGtex = (); 
-
-			    # check how many GTEx MDIs exist for the gene
+				
+			    # check how many GTEx MDIs exist for the gene. Only count a GTEx MDI if it has a different sequence. If it hasn't 
 			    if(exists $enrichmentGtex->{$ensg}) {
 				foreach my $nEnst (sort keys %{$enrichmentGtex->{$ensg}}) {
 				    foreach my $nSample (sort keys %{$enrichmentGtex->{$ensg}->{$nEnst}}) {
-					my $enrichmentGtex = $enrichmentGtex->{$ensg}->{$nEnst}->{$nSample};
-					if($enrichmentGtex >= $minEnrichment) {
+					my $nEnrichmentGtex = $enrichmentGtex->{$ensg}->{$nEnst}->{$nSample};
+					if($nEnrichmentGtex >= $minEnrichment and exists $sequences->{$nEnst} and exists $sequences->{$enst} and $sequences->{$nEnst} ne $sequences->{$enst}) {
 					    $gtexMDIs{$nEnst}++;
-					    push(@mdiEnrichmentsGtex, $enrichmentGtex);
+					    push(@mdiEnrichmentsGtex, $nEnrichmentGtex);
 					}
 				    }
 				}			
 			    }
 			    my $gtexMDIs = "";
+			    # skip if GTEx doesn't have MDI for 50% of its cases.
+			    my $skip = 1;
 			    foreach my $g (sort{$gtexMDIs{$b}<=>$gtexMDIs{$a}} keys %gtexMDIs) {
+				# check that sequence of MDI is different to sequence
 				$gtexMDIs .= "$g:$gtexMDIs{$g},";
+				$skip = 0 if($gtexMDIs{$g} >= ($#enstRelExpressesGtex+1)*0.5);
 			    }
+			    next if($skip);
 			    $gtexMDIs =~ s/,$//g;
   			    my $medianMDIenrichmentGtex = "-";
 			    $medianMDIenrichmentGtex = sprintf("%.3f", &median(@mdiEnrichmentsGtex)) if(@mdiEnrichmentsGtex > 0);
@@ -480,9 +539,7 @@ foreach my $ensg (sort keys %$enrichmentPcawg) {
 				foreach my $cInt (sort keys %{$missIsoInt->{$enst}}) {
 				    # interaction partners must be expressed too in same cancer sample!
 				    my ($pfam1, $domain1, $range1, $pfam2, $domain2, $ensp2, $stringScore, $dimaScore) = split(/\:/, $cInt);
-				    if(exists $ensgExpressPcawg->{$canonical->{$ensp2}}->{$sample}
-				       and
-				       $ensgExpressPcawg->{$canonical->{$ensp2}}->{$sample} > $minExpress) {
+				    if(exists $ensgExpressPcawg->{$canonical->{$ensp2}}->{$sample}) {
 					my $found = 0;
 					if(exists $enrichmentGtex->{$ensg}) {
 					    foreach my $nEnst (sort keys %{$enrichmentGtex->{$ensg}}) {
@@ -518,7 +575,7 @@ foreach my $ensg (sort keys %$enrichmentPcawg) {
 					 "%s\t%i\t".
 					 "%i\t%i",
 					 $#mdiEnrichmentsGtex+1, $enrichmentPcawg,
-					 $relExpressionGtexMedian/$multFactor, $enstRelExpressPcawg/$multFactor,
+					 $relExpressionGtexMedian, $enstRelExpressPcawg,
 					 $missedInt, $stringIntN,
 					 $missedCancerIntN, $missedCommonIntN));
 			}
@@ -548,4 +605,5 @@ for(my $i=0; $i<@outputPart1; $i++){
     printf("%s\t%.3e\t%.3e\t%s\n", $outputPart1[$i], $pvalues[$i], $qvalues[$i], $outputPart2[$i]) if($qvalues[$i] < $maxQvalue);
 }
 
-close(O) if(defined $pvalueFile);
+close(O1) if(defined $pvalueFile);
+close(O2) if(defined $randomPvalueFile);
