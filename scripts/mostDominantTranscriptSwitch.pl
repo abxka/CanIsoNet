@@ -4,9 +4,9 @@
 
 ###############################################################################
 ###############################################################################
-### Determines MDI based on 2-fold expression difference to 2nd MDI and     ###
-### subsequently compares the relative expression difference to expression  ###
-### differences in GTEx using a Weibull distribution based P-value.         ### 
+### Determines cancer-specific MDT based on 2-fold expression difference to ###
+### minor dominant transcripts and subsequently compares the relative       ###
+### expression difference to expression differences in GTEx using Sign-test.###
 ###############################################################################
 ###############################################################################
 
@@ -33,27 +33,31 @@ my (
     $sequenceFile,
     $pvalueFile,
     $randomPvalueFile,
+    $pcawgEnrichmentFile,
+    $gtexEnrichmentFile,
    );
 
 ##############################################################################
 ### read all needed parameters from commandline ##############################
 
 &GetOptions(
-    "help!"                 => \$help,             # print this help
-    "pcawg=s"               => \$expressPcawgFile, # e.g. databases/pcawg/expression/pcawg.rnaseq.transcript.expr.tpm.tsv.gz
-    "gtex=s"                => \$expressGtexFile,  # e.g. databases/pcawg/gtex/GTEX_v4.pcawg.transcripts.tpm.tsv.gz
-    "ensgFile=s"            => \$enst2ensgFile,    # e.g. ensg_ensp_enst_ense_geneName_v75.tsv.gz
-    "canonFile=s"           => \$canonFile,        # e.g. /mnt/mnemo2/abdullah/databases/string/v10.0/canonical_isoforms_ensg_ensp_enst_geneName_v75.tsv.gz
-    "isoformIntFile=s"      => \$isoformIntFile,   # isoform interaction file, e.g. interactionsInIsoforms_900_2.tsv.gz
-    "sequenceFile=s"        => \$sequenceFile,     # file with sequences of ENSPs e.g. ensp_ensg_enst_sequence.tsv.gz
-    "minStringScore=i"      => \$minStringScore,   # e.g. 900
-    "enstColumnNuo=i"       => \$enstColumnNo,     # e.g. 0. Column number of enst in pcawg and gtex file. Starts with 0.
-    "minEnrichment=f"       => \$minEnrichment,    # e.g. 2
-    "maxQvalue=f"           => \$maxQvalue,        # e.g. 0.05
-    "minExpress=f"          => \$minExpress,       # e.g. 1. Minimum Expression below which isoform is considered to be not expressed.
-    "pvalueFile:s"          => \$pvalueFile,       # e.g. pvalues.tsv
-    "randomPvalueFile:s"    => \$randomPvalueFile, # e.g. random_pvalues.tsv
-    "verbose!"              => \$verbose,          # print out additional information on calculation progress plus warning messages
+    "help!"                  => \$help,                # print this help
+    "pcawg=s"                => \$expressPcawgFile,    # e.g. pcawg.rnaseq.transcript.expr.tpm.tsv.gz
+    "gtex=s"                 => \$expressGtexFile,     # e.g. GTEX_v4.pcawg.transcripts.tpm.tsv.gz
+    "ensgFile=s"             => \$enst2ensgFile,       # e.g. ensg_ensp_enst_ense_geneName_v75.tsv.gz
+    "canonFile=s"            => \$canonFile,           # e.g. canonical_isoforms_ensg_ensp_enst_geneName_v75.tsv.gz
+    "isoformIntFile=s"       => \$isoformIntFile,      # isoform interaction file, e.g. interactionsInIsoforms_900_2.tsv.gz
+    "sequenceFile=s"         => \$sequenceFile,        # file with sequences of ENSPs e.g. ensp_ensg_enst_sequence.tsv.gz
+    "minStringScore=i"       => \$minStringScore,      # e.g. 900
+    "enstColumnNuo=i"        => \$enstColumnNo,        # e.g. 0. Column number of enst in pcawg and gtex file. Starts with 0.
+    "minEnrichment=f"        => \$minEnrichment,       # e.g. 2
+    "maxQvalue=f"            => \$maxQvalue,           # e.g. 0.05
+    "minExpress=f"           => \$minExpress,          # e.g. 1. Minimum Expression below which isoform is considered to be not expressed.
+    "pvalueFile:s"           => \$pvalueFile,          # e.g. pvalues.tsv
+    "randomPvalueFile:s"     => \$randomPvalueFile,    # e.g. random_pvalues.tsv
+    "pcawgEnrichmentFile:s" => \$pcawgEnrichmentFile,  # e.g. pcawg_express.tsv.gz
+    "gtexEnrichmentFile:s"  => \$gtexEnrichmentFile,   # e.g. gtex_express.tsv.gz
+    "verbose!"               => \$verbose,             # print out additional information on calculation progress plus warning messages
 ) or die "\nTry \"$0 -h\" for a complete list of options\n\n";
 
 ##############################################################################
@@ -207,8 +211,9 @@ sub readExpressionFile {
 ##############################################################################
 sub enrichment {
 
-    my ($express, $minimumExpress) = @_;
+    my ($express, $minimumExpress, $file) = @_;
 
+    open(O3, "| gzip > $file") if(defined $file);
     my %enrichment = ();
     my @allEnrichment = ();
     foreach my $ensg (sort keys %$express) {
@@ -225,7 +230,7 @@ sub enrichment {
 
 		my $enstExpress = $express->{$ensg}->{$sample}->{$enst};
 
-		# the first transcript is the one with the hightest expression, i.e. the one which is potentially the MDI. 
+		# the first transcript is the one with the hightest expression, i.e. the one which is potentially the MDT. 
 		if(++$n == 1) {
 		    $mostDominantEnst = $enst;
 		    $mostDominantEnstExpress = $express->{$ensg}->{$sample}->{$enst};
@@ -235,6 +240,7 @@ sub enrichment {
 		# ignore transcripts with insignifcant expression
 		if($mostDominantEnstExpress >= $minimumExpress){
 		    $enrichment = $mostDominantEnstExpress/$enstExpress if($enstExpress > 0);
+		    print O3 "$sample\t$ensg\t$mostDominantEnst\t$enst\t$mostDominantEnstExpress\t$enstExpress\t$enrichment\n" if(defined $file);
 		    if($enrichment >= $minEnrichment) {
 			$enrichment{$ensg}->{$mostDominantEnst}->{$sample} = $enrichment;
 			push(@allEnrichment, $enrichment);
@@ -244,6 +250,7 @@ sub enrichment {
 	    }
 	}
     }
+    close(O3) if(defined $file);
     return (\%enrichment, \@allEnrichment);
 }
 ###############################################################################
@@ -403,31 +410,31 @@ my ($sequences) = &readSequenceFile();
 print STDERR "done\n" if($verbose);
 
 print STDERR "Calculating Enrichment for PCAWG ... " if($verbose);
-my ($enrichmentPcawg, $allEnrichmentPcawg) = &enrichment($enstExpressPcawg, $minExpress);
+my ($enrichmentPcawg, $allEnrichmentPcawg) = &enrichment($enstExpressPcawg, $minExpress, $pcawgEnrichmentFile);
 print STDERR "done\n" if($verbose);
 
 print STDERR "Calculating Enrichment for GTEx ... " if($verbose);
-my ($enrichmentGtex, $allEnrichmentGtex) = &enrichment($enstExpressGtex, $minExpress*0.1);
+my ($enrichmentGtex, $allEnrichmentGtex) = &enrichment($enstExpressGtex, $minExpress*0.1, $gtexEnrichmentFile);
 print STDERR "done\n" if($verbose);
 
 # print file header
-print "#ENSG\tENSPcanon\tDomCancerTrans\tCancerSampleId\t".
-      "GTExMDIs\ttotalRelevantGtexSamples\tMedianEnrichmentGTExMDIs\tPvalue\tQvalue\tNumberOfGtexMDIs\tEnrichmentMDIinCancer\t".
-      "MedianRelMDIexpressionInNormal\tRelMDIexpressionInCancer\t".
-      "UniqMissedInteractionsOfDomCancerTrans\tTotalNumberOfStringInt\t".
-      "NumberOfUniqMissedInteractionsOfDomCancerTrans\tNumberOfCommonMissedInteractionsOfDomTrans\n";
+print "#ENSG\tENSPcanon\tcMDT\tRNAseqAliquotID\t".
+      "GTExMDT\tTotalRelevantGTExSamples\tGTExMDTmedianEnrichment\tPvalue\tQvalue\tNumberOfGTExMDT\tcMDTenrichment\t".
+      "GTExMDTmedianRelExpression\tcMDTrelExpression\t".
+      "cMDTuniqMissedInt\tTotalNumberOfSTRINGint\t".
+      "cMDTnumberOfUniqMissedInt\tNumberOfCommonMissedInt\n";
 
 my $R = Statistics::R->new();
 $R->startR();
 
 if(defined $pvalueFile) {
     open(O1, ">$pvalueFile");
-    print O1 "#ENSG\tDomCancerTrans\tCancerSampleId\tMedianRelMDIexpressionInNormal\tRelMDIexpressionInCancer\t".
-	  "PCAWGhigherExpressionN\tPCAWGlowerExpressionN\tPvalue\tRelMDIexpressionInGTEx\n";
+    print O1 "#ENSG\tcMDT\ttRNAseqAliquotID\tMedianRelMDTexpressionInNormal\tRelMDTexpressionInCancer\t".
+	  "PCAWGhigherExpressionN\tPCAWGlowerExpressionN\tPvalue\tRelMDTexpressionInGTEx\n";
 }
 if(defined $randomPvalueFile) {
     open(O2, ">$randomPvalueFile");
-    print O2 "#ENSG\tDomCancerTrans\tCancerSampleId\tMedianRelMDIexpressionInNormal\tRelMDIexpressionInCancer\t".
+    print O2 "#ENSG\tDomCancerTrans\tCancerSampleId\tMedianRelMDTexpressionInNormal\tRelMDTexpressionInCancer\t".
 	     "PCAWGhigherExpressionN\tPCAWGlowerExpressionN\tPvalue\n";
 }
 
@@ -443,7 +450,7 @@ foreach my $ensg (sort keys %$enrichmentPcawg) {
 		    my $enrichmentPcawg = $enrichmentPcawg->{$ensg}->{$enst}->{$sample};
 		    my $enstRelExpressPcawg = $relEnstExpressPcawg->{$ensg}->{$enst}->{$sample};
 		    my $enstRelExpressesGtex = $relEnstExpressStringGtex->{$ensg}->{$enst};
-		    # only do analysis for MDI, i.e. those transcripts having a two-fold expression surplus + their frequency is 
+		    # only do analysis for MDT, i.e. those transcripts having a two-fold expression surplus + their frequency is 
 		    # significantly different from GTEx and they are specific to PCAWG + they are expressed more than minExpress
 		    if(!exists $enrichmentGtex->{$ensg}->{$enst} and (exists $enrichmentGtex->{$ensg} and keys %{$enrichmentGtex->{$ensg}} > 0)) {
 			
@@ -501,36 +508,36 @@ foreach my $ensg (sort keys %$enrichmentPcawg) {
 			    $stringIntN = $intN->{$enst} if(exists $intN->{$enst});
 			    my $missedCancerIntN = -1;
 			    my $missedCommonIntN = -1;
-			    my %gtexMDIs = ();
+			    my %gtexMDTs = ();
 			    my @mdiEnrichmentsGtex = (); 
 				
-			    # check how many GTEx MDIs exist for the gene. Only count a GTEx MDI if it has a different sequence. If it hasn't 
+			    # check how many GTEx MDTs exist for the gene. Only count a GTEx MDT if it has a different sequence. If it hasn't 
 			    if(exists $enrichmentGtex->{$ensg}) {
 				foreach my $nEnst (sort keys %{$enrichmentGtex->{$ensg}}) {
 				    foreach my $nSample (sort keys %{$enrichmentGtex->{$ensg}->{$nEnst}}) {
 					my $nEnrichmentGtex = $enrichmentGtex->{$ensg}->{$nEnst}->{$nSample};
 					if($nEnrichmentGtex >= $minEnrichment and exists $sequences->{$nEnst} and exists $sequences->{$enst} and $sequences->{$nEnst} ne $sequences->{$enst}) {
-					    $gtexMDIs{$nEnst}++;
+					    $gtexMDTs{$nEnst}++;
 					    push(@mdiEnrichmentsGtex, $nEnrichmentGtex);
 					}
 				    }
 				}			
 			    }
-			    my $gtexMDIs = "";
-			    # skip if GTEx doesn't have MDI for 50% of its cases.
+			    my $gtexMDTs = "";
+			    # skip if GTEx doesn't have MDT for 50% of its cases.
 			    my $skip = 1;
-			    foreach my $g (sort{$gtexMDIs{$b}<=>$gtexMDIs{$a}} keys %gtexMDIs) {
-				# check that sequence of MDI is different to sequence
-				$gtexMDIs .= "$g:$gtexMDIs{$g},";
-				$skip = 0 if($gtexMDIs{$g} >= ($#enstRelExpressesGtex+1)*0.5);
+			    foreach my $g (sort{$gtexMDTs{$b}<=>$gtexMDTs{$a}} keys %gtexMDTs) {
+				# check that sequence of MDT is different to sequence
+				$gtexMDTs .= "$g:$gtexMDTs{$g},";
+				$skip = 0 if($gtexMDTs{$g} >= ($#enstRelExpressesGtex+1)*0.5);
 			    }
 			    next if($skip);
-			    $gtexMDIs =~ s/,$//g;
-  			    my $medianMDIenrichmentGtex = "-";
-			    $medianMDIenrichmentGtex = sprintf("%.3f", &median(@mdiEnrichmentsGtex)) if(@mdiEnrichmentsGtex > 0);
+			    $gtexMDTs =~ s/,$//g;
+  			    my $medianMDTenrichmentGtex = "-";
+			    $medianMDTenrichmentGtex = sprintf("%.3f", &median(@mdiEnrichmentsGtex)) if(@mdiEnrichmentsGtex > 0);
 
 			    # check whether interactions are disrupted. If there are, check that interaction partner
-			    # is expressed and that interactions are not already disrupted by GTEx MDIs. 
+			    # is expressed and that interactions are not already disrupted by GTEx MDTs. 
 			    if(exists $missIsoInt->{$enst}) {
 				# set values to 0 to indicate that interaction data is available for transcript
 				$missedCancerIntN = 0;
@@ -567,7 +574,7 @@ foreach my $ensg (sort keys %$enrichmentPcawg) {
 			    push(@outputPart1,
 				 sprintf("%s\t%s\t%s\t%s\t%s\t%i\t%s",
 					 $ensg, (exists $canonical->{$enst} ? $canonical->{$enst} : "-"), $enst, $sample,
-					 ($gtexMDIs eq "" ? "-" : $gtexMDIs), $#enstRelExpressesGtex+1, $medianMDIenrichmentGtex));
+					 ($gtexMDTs eq "" ? "-" : $gtexMDTs), $#enstRelExpressesGtex+1, $medianMDTenrichmentGtex));
 			    
 			    push(@outputPart2,
 				 sprintf("%i\t%.3f\t".
