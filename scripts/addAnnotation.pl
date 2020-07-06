@@ -28,6 +28,7 @@ my (
     $ensp1col,
     $ensp2col,
     $ensg1col,
+    $minExpress,
     $verbose,
    );
 
@@ -42,11 +43,12 @@ my (
     "keggCancerFile=s"  => \$keggCancerFile, # e.g. keggCancerPathways_ensg.tsv.gz
     "keggFile=s"        => \$keggFile,       # e.g. kegg_benchmarking.CONN_maps_in_human.tsv
     "expressFile=s"     => \$expressFile,    # e.g. isoformExpressionInCancer.tsv.gz
-    "isoIntFile=s"      => \$isoIntFile,     # e.g. interactionsInIsoforms_0_2.tsv.gz
+    "isoIntFile:s"      => \$isoIntFile,     # e.g. interactionsInIsoforms_0_2.tsv.gz
     "step:s"            => \$step,           # restrict calculations on steps. Default 1234
     "ensp1col:i"        => \$ensp1col,       # column number of 1st STRING ENSP. Starts with 0.
     "ensp2col=i"        => \$ensp2col,       # column number of 2nd STRING ENSP. Starts with 0.
     "ensg1col:i"        => \$ensg1col,       # column number of 1st ENSG. Starts with 0.
+    "minExpress:s"      => \$minExpress,     # Minimum expression for random background determination. Default is 2.
     "verbose!"          => \$verbose,        # print out additional information.
 ) or die "\nTry \"$0 -h\" for a complete list of options\n\n";
 
@@ -61,6 +63,7 @@ if ($help) {printHelp(); exit}
 $step = "1234" if(!defined $step);
 my $randMaxRep = 5000;
 my $expressWindow = 0.1; # +-10%;
+$minExpress = 2 if(!defined $minExpress);
 srand(23);
 $| = 1;
 ##############################################################################
@@ -185,12 +188,12 @@ sub readCosmicFile {
 	chomp($_);
 	my @a = split(/\t/);
 	if (!exists $h{$a[2]}->{$a[0]}){
-	    $h{$a[2]}->{$a[0]}=$a[4];
-	    $n{$a[2]}->{$a[0]}=$a[1];
+	    $h{$a[2]}->{$a[0]} = $a[5];
+	    $n{$a[2]}->{$a[0]} = $a[1];
 	} else{
-	    if($a[4] > $h{$a[2]}->{$a[0]}) {
-		$h{$a[2]}->{$a[0]}=$a[4];
-		$n{$a[2]}->{$a[0]}=$a[1];
+	    if($a[5] > $h{$a[2]}->{$a[0]}) {
+		$h{$a[2]}->{$a[0]} = $a[5];
+		$n{$a[2]}->{$a[0]} = $a[1];
 	    }
 	}
     }
@@ -250,8 +253,8 @@ sub readIsoExpressFile {
 	my ($cancerType, $aliquotId, $ensg, $stringEnsp, $ensp, $enst,
 	    $totalGeneExpression, $isoformExpression, $ratio) = split(/\s/, $l);
 
-	$express{$ensp} = $totalGeneExpression;
-	$stringExpress{$stringEnsp} = $totalGeneExpression;
+	$express{$ensp}->{$ensg} = $totalGeneExpression;
+	$stringExpress{$ensg}->{$ensp} = $stringEnsp;
     }
     close(F6);
     return (\%express, \%stringExpress);
@@ -306,10 +309,6 @@ if(!defined $expressFile) {
     print STDERR "Please provide an isoform expression file file.\n";
     $error = 1;
 }
-if(!defined $isoIntFile) {
-    print STDERR "Please provide an isoform interaction file file.\n";
-    $error = 1;
-}
 if(!defined $ensp1col) {
     print STDERR "Please provide the column number of the 1st STRING ENSP ID.\n";
     $error = 1;
@@ -340,9 +339,12 @@ print STDERR "Reading in $ensgFile ..." if($verbose);
 my ($ensp2ensg, $ensg2gene) = &readEnsgFile();
 print STDERR "done\n" if($verbose);
 
-print STDERR "Reading in $isoIntFile ..." if($verbose);
-my $isoInt = &readIsoIntFile();
-print STDERR "done\n" if($verbose);
+my $isoInt = ();
+if(defined $isoIntFile) {
+    print STDERR "Reading in $isoIntFile ..." if($verbose);
+    $isoInt = &readIsoIntFile();
+    print STDERR "done\n" if($verbose);
+}
 
 if($step =~ /1/) {
     print STDERR "Reading in $stringDensFile ..." if($verbose);
@@ -365,7 +367,19 @@ if($step =~ /4/) {
     print STDERR "done\n" if($verbose);
 }
 
-my @ensp = keys %$stringExpress;
+# for random selection, choose a transcript that is expressed and has multiple isoforms
+my @ensp = ();
+foreach my $ensg (sort keys %$stringExpress) {
+    if(keys %{$stringExpress->{$ensg}} > 1) {
+	foreach my $ensp (sort keys %{$stringExpress->{$ensg}}) {
+	    if($express->{$ensp}->{$ensg} >= $minExpress) {
+		my $stringEnsp = $stringExpress->{$ensg}->{$ensp};
+		next if(defined $isoIntFile and !exists $isoInt->{$stringEnsp});
+		push(@ensp, $stringEnsp);
+	    }
+	}
+    }
+}
 my %random = ();
 my %selRandom = ();
 
@@ -381,7 +395,7 @@ while(<>) {
 	      "STRINGintN2\tSTRINGdensityScore2\tSTRINGdensityRank2" if($step =~ /1/);
 	print "\tENSPcanonCosmic\tENSPcanonCosmicDist\t".
  	        "ENSPcanonCosmicMinScore\tENSPcanon2cosmic\t".
-		"ENSPcanon2cosmicDist\tENSPcanon2cosminMinScore\t".
+		"ENSPcanon2cosmicDist\tENSPcanon2cosmicMinScore\t".
 		"ENSPrandom\tENSPrandomCosmic\tENSPrandomCosmicDist\tENSPrandomCosmicMinScore\t".
 		"MeanRandomDist\tMeanRandomMinScore" if($step =~ /2/);
 	print "\tKeggCancerPathway1\tKeggCancerPathway2" if($step =~ /3/);
@@ -460,7 +474,6 @@ while(<>) {
 		    last;
 		}
 		
-		next if(!exists $express->{$randomEnsp});
 		next if(exists $selRandom{$randomEnsp}); # randomEnsp should be selected only once, as there is also only one ensp in the dataset.
 		last;
 	    }
